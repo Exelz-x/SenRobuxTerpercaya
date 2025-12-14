@@ -184,6 +184,18 @@ export default function HomePage() {
   return (
     <main className="min-h-screen bg-black text-white">
       <div className="mx-auto max-w-6xl px-4 py-10">
+        {/* H1 SEO (homepage) */}
+        <h1>Beli Robux Murah via Gamepass – SenRobux</h1>
+
+        {/* Section kecil bawah H1 */}
+        <section className="hidden md:block">
+          <p>
+            SenRobux adalah layanan <strong>beli robux murah</strong> melalui
+            sistem<strong> gamepass</strong> yang aman dan terpercaya. 100 Robux
+            hanya <strong>12 Ribu</strong> Hanya di Senrobux.
+          </p>
+        </section>
+
         <header className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* LOGO */}
@@ -493,6 +505,7 @@ export default function HomePage() {
     </main>
   );
 }
+
 
 
 

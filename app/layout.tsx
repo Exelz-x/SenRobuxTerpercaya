@@ -14,10 +14,10 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "SenRobux",
+    default: "Beli Robux Murah via Gamepass 100 Robux hanya 12rb | SenRobux",
     template: "%s | SenRobux",
   },
-  description: "SenRobux - Jual Robux cepat & terpercaya",
+  description: "Beli robux murah dan terpercaya via gamepass 100 Robux hanya 12ribu. Proses 5 hari, aman, legal, dan cepat di SenRobux.",
   icons: {
     icon: "/favicon.ico",
   },
