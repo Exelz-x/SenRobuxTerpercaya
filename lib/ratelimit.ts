@@ -11,31 +11,30 @@ export const redis =
 export function getRatelimiter(kind: "public" | "ticket" | "admin") {
   if (!redis) return null;
 
-  // kamu bisa atur angka sesuai kebutuhan
   if (kind === "admin") {
-    // admin login jangan bisa brute force
+    // admin login + admin API: anti brute force
     return new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(5, "10 s"), // TEST juga
+      limiter: Ratelimit.slidingWindow(20, "1 m"), // 20/min per IP
       analytics: true,
       prefix: "rl_admin",
     });
   }
 
   if (kind === "ticket") {
-    // endpoint ticket rawan spam
+    // anti spam tiket/chat
     return new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(8, "1 m"), // 8/min/IP
+      limiter: Ratelimit.slidingWindow(10, "1 m"), // 10/min per IP
       analytics: true,
       prefix: "rl_ticket",
     });
   }
 
-  // public api umum (order, refresh, stock get, dll)
+  // public (order/create, order/get, stock/get, refresh-status)
   return new Ratelimit({
     redis,
-    limiter: Ratelimit.slidingWindow(5, "10 s"), // TEST: 5 request / 10 detik
+    limiter: Ratelimit.slidingWindow(60, "1 m"), // 60/min per IP
     analytics: true,
     prefix: "rl_public",
   });

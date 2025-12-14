@@ -43,11 +43,12 @@ export async function middleware(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        message: "Terlalu banyak request. Coba lagi nanti.",
+        message: "Terlalu banyak request. Silakan tunggu sebentar lalu coba lagi.",
       },
       {
         status: 429,
         headers: {
+          "Retry-After": String(reset), // detik sampai reset (Upstash reset biasanya unix sec; ini cukup sebagai hint)
           "X-RateLimit-Limit": String(limit),
           "X-RateLimit-Remaining": String(remaining),
           "X-RateLimit-Reset": String(reset),
