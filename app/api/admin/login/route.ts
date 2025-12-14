@@ -10,7 +10,7 @@ export async function POST(req: Request) {
   if (
     !process.env.ADMIN_USERNAME ||
     !process.env.ADMIN_PASSWORD ||
-    !process.env.ADMIN_JWT_SECRET
+    !process.env.JWT_SECRET
   ) {
     return NextResponse.json(
       {
