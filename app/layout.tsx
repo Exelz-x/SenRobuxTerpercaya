@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   },
   description: "SenRobux - Jual Robux cepat & terpercaya",
   icons: {
-    icon: "/senrobux-logo.png",
+    icon: "/favicon.ico",
   },
 };
 
