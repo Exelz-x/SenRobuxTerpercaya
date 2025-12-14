@@ -187,8 +187,8 @@ export default function HomePage() {
         {/* H1 SEO (homepage) */}
         <h1>Beli Robux Murah via Gamepass – SenRobux</h1>
 
-        {/* Section kecil bawah H1 */}
-        <section className="hidden md:block">
+        {/* SEO text (hidden di mobile, tampil di md+) */}
+        <section className="hidden md:block mt-3 text-sm text-white/60">
           <p>
             SenRobux adalah layanan <strong>beli robux murah</strong> melalui
             sistem<strong> gamepass</strong> yang aman dan terpercaya. 100 Robux
@@ -196,7 +196,7 @@ export default function HomePage() {
           </p>
         </section>
 
-        <header className="flex items-center justify-between">
+        <header className="mt-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* LOGO */}
             <div className="h-16 w-16 rounded-2xl bg-green-500/30 ring-1 ring-green-400/50 flex items-center justify-center p-1">
@@ -230,10 +230,10 @@ export default function HomePage() {
         </header>
 
         <section className="mt-10 rounded-3xl border border-green-500/20 bg-white/5 p-8 shadow-[0_0_50px_rgba(34,197,94,0.08)]">
-          <h1 className="text-3xl font-bold">
+          <h2 className="text-3xl font-bold">
             Top Up Robux Murah 100 Robux hanya{" "}
             <span className="text-green-400">12 Ribu</span>
-          </h1>
+          </h2>
           <p className="mt-2 text-white/70 max-w-2xl">
             Dapatkan Robux Aman & Murah Via gamepass 5 hari Di Senrobux.
           </p>
@@ -340,7 +340,7 @@ export default function HomePage() {
               ))}
             </div>
 
-            {/* Custom robux (TOMBOL "PAKAI" DIHILANGIN) */}
+            {/* Custom robux */}
             <div className="mt-4 rounded-2xl bg-black/30 p-4 ring-1 ring-white/10">
               <div className="text-sm text-white/70">Jumlah Robux Custom</div>
 
@@ -505,6 +505,7 @@ export default function HomePage() {
     </main>
   );
 }
+
 
 
 
