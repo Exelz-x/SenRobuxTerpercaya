@@ -27,7 +27,10 @@ export async function POST(req: Request) {
   // 1) Verify signature Midtrans
   const serverKey = process.env.MIDTRANS_SERVER_KEY;
   if (!serverKey) {
-    return NextResponse.json({ ok: false, message: "MIDTRANS_SERVER_KEY belum di-set" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, message: "MIDTRANS_SERVER_KEY belum di-set" },
+      { status: 500 }
+    );
   }
 
   const expected = sha512(`${order_id}${status_code}${gross_amount}${serverKey}`);
@@ -74,10 +77,9 @@ export async function POST(req: Request) {
       if (!order.stock_deducted) {
         const amount = Number(order.robux_target);
 
-        const { data: okDeduct, error: dErr } = await supabaseAdmin.rpc(
-          "decrement_stock",
-          { p_amount: amount }
-        );
+        const { data: okDeduct, error: dErr } = await supabaseAdmin.rpc("decrement_stock", {
+          p_amount: amount,
+        });
 
         if (!dErr && okDeduct === true) {
           // stok berhasil dipotong -> order jadi PAID
@@ -120,11 +122,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // ✅ CABANG BARU: EXPIRE => status EXPIRED
+  if (txStatus === "expire") {
+    await supabaseAdmin
+      .from("orders")
+      .update({
+        status: "EXPIRED",
+        midtrans_transaction_status: txStatus,
+      })
+      .eq("id", ourOrderId);
+
+    return NextResponse.json({ ok: true });
+  }
+
   // 3) Map status Midtrans ke status sistem kita (non-success)
   let newStatus = "PENDING_PAYMENT";
 
-  // cancelled/expired/failed
-  if (txStatus === "expire" || txStatus === "cancel" || txStatus === "deny") {
+  // cancelled/failed (expire sudah ditangani di atas)
+  if (txStatus === "cancel" || txStatus === "deny") {
     newStatus = "CANCELLED";
   }
 
@@ -141,5 +156,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true });
 }
+
+
 
 

@@ -10,7 +10,8 @@ function basicAuthHeader(serverKey: string) {
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const orderId = String(body?.orderId ?? "");
-  if (!orderId) return NextResponse.json({ ok: false, message: "orderId kosong" }, { status: 400 });
+  if (!orderId)
+    return NextResponse.json({ ok: false, message: "orderId kosong" }, { status: 400 });
 
   // ambil order
   const { data: order, error: oErr } = await supabaseAdmin
@@ -19,8 +20,10 @@ export async function POST(req: Request) {
     .eq("id", orderId)
     .single();
 
-  if (oErr || !order) return NextResponse.json({ ok: false, message: "Order tidak ditemukan" }, { status: 404 });
-  if (!order.midtrans_order_id) return NextResponse.json({ ok: false, message: "midtrans_order_id belum tersimpan" }, { status: 400 });
+  if (oErr || !order)
+    return NextResponse.json({ ok: false, message: "Order tidak ditemukan" }, { status: 404 });
+  if (!order.midtrans_order_id)
+    return NextResponse.json({ ok: false, message: "midtrans_order_id belum tersimpan" }, { status: 400 });
 
   const serverKey = process.env.MIDTRANS_SERVER_KEY!;
   const isProd = (process.env.MIDTRANS_IS_PRODUCTION ?? "false") === "true";
@@ -38,7 +41,10 @@ export async function POST(req: Request) {
 
   const st = await statusRes.json().catch(() => null);
   if (!statusRes.ok || !st) {
-    return NextResponse.json({ ok: false, message: "Gagal cek status Midtrans", detail: st }, { status: 502 });
+    return NextResponse.json(
+      { ok: false, message: "Gagal cek status Midtrans", detail: st },
+      { status: 502 }
+    );
   }
 
   const txStatus = String(st.transaction_status ?? "");
@@ -47,12 +53,24 @@ export async function POST(req: Request) {
     txStatus === "settlement" ||
     (txStatus === "capture" && (fraudStatus === "accept" || fraudStatus === ""));
 
+  // ✅ CABANG BARU: EXPIRE => status EXPIRED
+  if (txStatus === "expire") {
+    await supabaseAdmin
+      .from("orders")
+      .update({ status: "EXPIRED", midtrans_transaction_status: txStatus })
+      .eq("id", orderId);
+
+    return NextResponse.json({ ok: true, status: "EXPIRED", txStatus });
+  }
+
   // Update status di order
   if (isSuccess) {
     // potong stok kalau belum pernah
     if (!order.stock_deducted) {
       const amount = Number(order.robux_target);
-      const { data: okDeduct, error: dErr } = await supabaseAdmin.rpc("decrement_stock", { p_amount: amount });
+      const { data: okDeduct, error: dErr } = await supabaseAdmin.rpc("decrement_stock", {
+        p_amount: amount,
+      });
 
       if (!dErr && okDeduct === true) {
         await supabaseAdmin
@@ -87,7 +105,11 @@ export async function POST(req: Request) {
       })
       .eq("id", orderId);
 
-    return NextResponse.json({ ok: true, status: order.status === "DONE" ? "DONE" : "PAID", txStatus });
+    return NextResponse.json({
+      ok: true,
+      status: order.status === "DONE" ? "DONE" : "PAID",
+      txStatus,
+    });
   }
 
   // kalau belum sukses, simpan status transaksi juga
@@ -101,3 +123,4 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, status: order.status, txStatus });
 }
+

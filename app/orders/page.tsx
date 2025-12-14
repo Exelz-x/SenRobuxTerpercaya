@@ -87,13 +87,6 @@ export default function OrdersPage() {
     return orders.filter((o) => tabOf(o) === activeTab);
   }, [orders, activeTab]);
 
-  function clearOrders() {
-    if (!confirm("Hapus daftar pesanan dari perangkat ini?")) return;
-    localStorage.removeItem("senrobux_orders");
-    setIds([]);
-    setOrders([]);
-  }
-
   return (
     <main className="min-h-screen bg-black text-white">
       <div className="mx-auto max-w-5xl px-4 py-10">
@@ -112,12 +105,6 @@ export default function OrdersPage() {
             >
               Beranda
             </a>
-            <button
-              onClick={clearOrders}
-              className="rounded-xl bg-red-500/10 px-4 py-2 text-sm font-semibold ring-1 ring-red-400/20 hover:ring-red-400/40"
-            >
-              Hapus daftar
-            </button>
           </div>
         </div>
 
@@ -236,4 +223,5 @@ export default function OrdersPage() {
     </main>
   );
 }
+
 
