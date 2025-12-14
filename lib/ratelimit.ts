@@ -16,7 +16,7 @@ export function getRatelimiter(kind: "public" | "ticket" | "admin") {
     // admin login jangan bisa brute force
     return new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(10, "1 m"), // 10 request / menit / IP
+      limiter: Ratelimit.slidingWindow(5, "10 s"), // TEST juga
       analytics: true,
       prefix: "rl_admin",
     });
@@ -35,7 +35,7 @@ export function getRatelimiter(kind: "public" | "ticket" | "admin") {
   // public api umum (order, refresh, stock get, dll)
   return new Ratelimit({
     redis,
-    limiter: Ratelimit.slidingWindow(30, "1 m"), // 30/min/IP
+    limiter: Ratelimit.slidingWindow(5, "10 s"), // TEST: 5 request / 10 detik
     analytics: true,
     prefix: "rl_public",
   });
