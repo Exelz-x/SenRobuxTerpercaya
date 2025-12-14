@@ -85,13 +85,14 @@ export default function HomePage() {
     const cleaned = v.replace(/[^\d]/g, "");
     setCustomRobux(cleaned);
 
+    // kalau kosong, jangan ubah robux (biar user bisa hapus & ketik ulang)
     if (!cleaned) return;
 
     const n = parseInt(cleaned, 10);
     if (Number.isFinite(n)) {
       const clamped = clampRobux(n);
       setRobux(clamped);
-      setCustomRobux(String(clamped));
+      // jangan setCustomRobux(String(clamped)) biar caret tidak loncat-loncat
       setEditingPrice(false);
       setPriceInput("");
     }
@@ -183,41 +184,38 @@ export default function HomePage() {
   return (
     <main className="min-h-screen bg-black text-white">
       <div className="mx-auto max-w-6xl px-4 py-10">
-      <header className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {/* LOGO */}
-          <div className="h-16 w-16 rounded-2xl bg-green-500/30 ring-1 ring-green-400/50 flex items-center justify-center p-1">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/senrobux-logo.png"
-              alt="SenRobux Logo"
-              className="h-full w-full object-contain"
-            />
+        <header className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {/* LOGO */}
+            <div className="h-16 w-16 rounded-2xl bg-green-500/30 ring-1 ring-green-400/50 flex items-center justify-center p-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/senrobux-logo.png"
+                alt="SenRobux Logo"
+                className="h-full w-full object-contain"
+              />
+            </div>
+
+            {/* TEXT LOGO - NEON PREMIUM (RECOMMENDED) */}
+            <div
+              className="
+                text-3xl font-extrabold tracking-wider text-green-400
+                drop-shadow-[0_0_12px_rgba(34,197,94,0.9)]
+              "
+            >
+              SenRobux
+            </div>
           </div>
 
-          {/* TEXT LOGO - NEON PREMIUM (RECOMMENDED) */}
-          <div
-            className="
-              text-3xl font-extrabold tracking-wider text-green-400
-              drop-shadow-[0_0_12px_rgba(34,197,94,0.9)]
-            "
-          >
-            SenRobux
-          </div>
-        </div>
-
-        <nav className="text-sm text-white/70 flex gap-6">
-          <a href="/" className="hover:text-white">
-            Beranda
-          </a>
-          <a href="/orders" className="hover:text-white">
-            Pesanan Kita
-          </a>
-          <a href="/support" className="hover:text-white">
-            Customer Service
-          </a>
-        </nav>
-      </header>
+          <nav className="text-sm text-white/70 flex gap-6">
+            <a href="/orders" className="hover:text-white">
+              Pesanan Kita
+            </a>
+            <a href="/support" className="hover:text-white">
+              Customer Service
+            </a>
+          </nav>
+        </header>
 
         <section className="mt-10 rounded-3xl border border-green-500/20 bg-white/5 p-8 shadow-[0_0_50px_rgba(34,197,94,0.08)]">
           <h1 className="text-3xl font-bold">
@@ -233,7 +231,8 @@ export default function HomePage() {
           {/* LEFT */}
           <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
             <div className="text-lg font-semibold">
-              Langkah 1: <span className="text-green-400">Masukkan Username</span>
+              Langkah 1:{" "}
+              <span className="text-green-400">Masukkan Username</span>
             </div>
 
             <label className="mt-4 block text-sm text-white/70">
@@ -329,7 +328,7 @@ export default function HomePage() {
               ))}
             </div>
 
-            {/* Custom robux */}
+            {/* Custom robux (TOMBOL "PAKAI" DIHILANGIN) */}
             <div className="mt-4 rounded-2xl bg-black/30 p-4 ring-1 ring-white/10">
               <div className="text-sm text-white/70">Jumlah Robux Custom</div>
 
@@ -343,26 +342,11 @@ export default function HomePage() {
                   onChange={(e) => onCustomRobuxChange(e.target.value)}
                   className="flex-1 rounded-xl bg-black/40 px-4 py-3 ring-1 ring-white/10 outline-none focus:ring-green-400/40"
                 />
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const n = parseInt(customRobux || "0", 10);
-                    const ok = Number.isFinite(n) && n > 0;
-                    if (!ok) return;
-                    setRobuxSynced(n);
-                    setEditingPrice(false);
-                    setPriceInput("");
-                  }}
-                  className="rounded-xl bg-white/5 px-4 py-3 text-sm font-semibold ring-1 ring-white/10 hover:ring-green-400/30"
-                >
-                  Pakai
-                </button>
               </div>
 
               <p className="mt-2 text-xs text-white/50">
-                Isi jumlah Robux sesuai keinginan. Angka akan otomatis dipilih untuk
-                checkout.
+                Isi jumlah Robux sesuai keinginan. Angka akan otomatis dipilih
+                untuk checkout.
               </p>
             </div>
 
@@ -509,6 +493,7 @@ export default function HomePage() {
     </main>
   );
 }
+
 
 
 
