@@ -15,7 +15,7 @@ type Order = {
   created_at?: string;
   roblox_username?: string;
   robux_target?: number;
-  amount_idr?: number;
+  amount_idr?: number; // harga dasar (tanpa biaya admin midtrans)
   status?: string;
   payment_channel?: string | null;
   payment_method?: string | null;
@@ -47,6 +47,11 @@ export default function PayPage() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
+  // ✅ tambahan: untuk tampilkan biaya admin midtrans + total
+  const [midtransTotal, setMidtransTotal] = useState<number | null>(null);
+  const [midtransFee, setMidtransFee] = useState<number | null>(null);
+  const [midtransMethod, setMidtransMethod] = useState<string | null>(null);
+
   // member modal state
   const [showMember, setShowMember] = useState(false);
   const [memberStep, setMemberStep] = useState<1 | 2>(1);
@@ -75,7 +80,7 @@ export default function PayPage() {
     }
   }, []);
 
-  // ✅ ambil detail order untuk ditampilkan
+  // ambil detail order untuk ditampilkan
   useEffect(() => {
     if (!orderId) return;
 
@@ -86,10 +91,11 @@ export default function PayPage() {
       try {
         const r = await fetch(`/api/order/get?id=${orderId}`, { cache: "no-store" });
         const j = await r.json().catch(() => null);
-        if (!stop) {
-          if (r.ok && j?.ok && j?.order) setOrder(j.order as Order);
-          else setOrder(null);
-        }
+
+        if (stop) return;
+
+        if (r.ok && j?.ok && j?.order) setOrder(j.order as Order);
+        else setOrder(null);
       } catch {
         if (!stop) setOrder(null);
       } finally {
@@ -98,40 +104,35 @@ export default function PayPage() {
     }
 
     load();
-
     return () => {
       stop = true;
     };
   }, [orderId]);
 
-  // ✅ POLLING STATUS (auto redirect kalau sudah PAID)
+  // POLLING STATUS (auto redirect kalau sudah PAID) — hanya untuk MIDTRANS
   useEffect(() => {
     if (!orderId) return;
+    if (order?.payment_channel === "MEMBER") return;
 
     let stop = false;
 
     async function tick() {
       try {
-        // 1) paksa sync status dari Midtrans
         await fetch("/api/midtrans/refresh-status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ orderId }),
         });
 
-        // 2) ambil status order terbaru dari DB
         const r = await fetch(`/api/order/get?id=${orderId}`, { cache: "no-store" });
         const j = await r.json().catch(() => null);
 
         const latest = j?.order as Order | undefined;
         const status = String(latest?.status ?? "");
 
-        // update detail UI sekalian biar selalu fresh
         if (latest && !stop) setOrder(latest);
 
-        // status yang dianggap pembayaran sudah beres
         const paidLike = ["PAID", "WAITING_DELIVERY", "DONE", "PAID_WAIT_STOCK"];
-
         if (paidLike.includes(status)) {
           window.location.href = `/order-complete?id=${orderId}`;
         }
@@ -147,23 +148,47 @@ export default function PayPage() {
       stop = true;
       clearInterval(t);
     };
-  }, [orderId]);
+  }, [orderId, order?.payment_channel]);
+
+  const baseAmount = typeof order?.amount_idr === "number" ? order.amount_idr : null;
 
   const orderSummary = useMemo(() => {
     return {
       username: order?.roblox_username ?? "-",
-      robux: typeof order?.robux_target === "number" ? order.robux_target.toLocaleString("id-ID") : "-",
-      price: typeof order?.amount_idr === "number" ? formatIdr(order.amount_idr) : "-",
+      robux:
+        typeof order?.robux_target === "number"
+          ? order.robux_target.toLocaleString("id-ID")
+          : "-",
+      basePrice: baseAmount != null ? formatIdr(baseAmount) : "-",
       time: formatDateTime(order?.created_at),
       status: order?.status ?? "-",
     };
-  }, [order]);
+  }, [order, baseAmount]);
+
+  function applyMidtransResult(result: any) {
+    // result.gross_amount biasanya string
+    const grossRaw = result?.gross_amount ?? result?.transaction_details?.gross_amount;
+    const gross = Number(grossRaw);
+
+    if (Number.isFinite(gross) && gross > 0 && baseAmount != null) {
+      setMidtransTotal(gross);
+      setMidtransFee(Math.max(0, gross - baseAmount));
+    }
+
+    const method = String(result?.payment_type ?? result?.paymentType ?? "").trim();
+    if (method) setMidtransMethod(method);
+  }
 
   async function payNow() {
     if (!orderId) return;
 
     setLoading(true);
     setMsg("");
+
+    // reset info biaya admin supaya fresh tiap buka popup
+    setMidtransTotal(null);
+    setMidtransFee(null);
+    setMidtransMethod(null);
 
     try {
       const res = await fetch("/api/midtrans/create-snap", {
@@ -176,7 +201,9 @@ export default function PayPage() {
 
       if (!res.ok || !json.ok) {
         setMsg(
-          json.detail ? `${json.message}: ${json.detail}` : json.message ?? "Gagal membuat transaksi Midtrans"
+          json.detail
+            ? `${json.message}: ${json.detail}`
+            : json.message ?? "Gagal membuat transaksi Midtrans"
         );
         return;
       }
@@ -187,7 +214,14 @@ export default function PayPage() {
       }
 
       window.snap.pay(json.token, {
-        onSuccess: async function () {
+        // ✅ user sudah pilih metode dan transaksi jadi pending -> biasanya sudah ada gross_amount
+        onPending: function (result: any) {
+          applyMidtransResult(result);
+          setMsg("⏳ Pembayaran pending. Silakan selesaikan pembayaran.");
+        },
+
+        onSuccess: async function (result: any) {
+          applyMidtransResult(result);
           try {
             await fetch("/api/midtrans/refresh-status", {
               method: "POST",
@@ -197,13 +231,15 @@ export default function PayPage() {
           } catch {}
           window.location.href = `/order-complete?id=${orderId}`;
         },
-        onPending: function () {
-          setMsg("⏳ Pembayaran pending. Silakan selesaikan pembayaran.");
-        },
-        onError: function () {
+
+        onError: function (result: any) {
+          // kadang onError juga punya info pembayaran
+          applyMidtransResult(result);
           setMsg("❌ Pembayaran gagal. Coba lagi.");
         },
+
         onClose: function () {
+          setLoading(false);
           setMsg("Kamu menutup popup pembayaran. Klik Bayar lagi untuk mencoba.");
         },
       });
@@ -272,18 +308,37 @@ export default function PayPage() {
     }
   }
 
+  const showFeeBox =
+    baseAmount != null && midtransTotal != null && midtransFee != null;
+
   return (
     <main className="min-h-screen bg-black text-white">
       <div className="mx-auto max-w-3xl px-4 py-10">
         <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-          <h1 className="text-2xl font-bold">Checkout</h1>
-          <p className="mt-2 text-white/70">Pilih metode pembayaran di bawah.</p>
+          {/* Header + tombol beranda */}
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold">Checkout</h1>
+              <p className="mt-2 text-white/70">
+                Pilih metode pembayaran di bawah.
+              </p>
+            </div>
 
-          {/* ✅ GANTI Order ID -> Detail Pesanan */}
+            <a
+              href="/"
+              className="shrink-0 rounded-xl bg-white/5 px-4 py-2 text-sm font-semibold ring-1 ring-white/10 hover:ring-green-400/30"
+            >
+              Beranda
+            </a>
+          </div>
+
+          {/* Detail Pesanan */}
           <div className="mt-6 rounded-2xl bg-black/30 p-4 ring-1 ring-white/10">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm text-white/70">Detail Pesanan</div>
-              {loadingOrder && <div className="text-xs text-white/50">Memuat...</div>}
+              {loadingOrder && (
+                <div className="text-xs text-white/50">Memuat...</div>
+              )}
             </div>
 
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -298,8 +353,8 @@ export default function PayPage() {
               </div>
 
               <div className="rounded-xl bg-white/5 p-3 ring-1 ring-white/10">
-                <div className="text-xs text-white/60">Harga</div>
-                <div className="font-semibold">{orderSummary.price}</div>
+                <div className="text-xs text-white/60">Harga (dasar)</div>
+                <div className="font-semibold">{orderSummary.basePrice}</div>
               </div>
 
               <div className="rounded-xl bg-white/5 p-3 ring-1 ring-white/10">
@@ -311,14 +366,57 @@ export default function PayPage() {
                 <div className="text-xs text-white/60">Status</div>
                 <div className="font-semibold">
                   {orderSummary.status}
-                  {order?.midtrans_transaction_status ? ` • ${order.midtrans_transaction_status}` : ""}
+                  {order?.midtrans_transaction_status
+                    ? ` • ${order.midtrans_transaction_status}`
+                    : ""}
                 </div>
               </div>
             </div>
 
-            {/* opsional: tampilkan orderId kecil */}
-            <div className="mt-3 text-xs text-white/40 break-all">ID: {orderId || "-"}</div>
+            <div className="mt-3 text-xs text-white/40 break-all">
+              ID: {orderId || "-"}
+            </div>
           </div>
+
+          {/* ✅ Box biaya admin setelah user pilih metode di Snap */}
+          {showFeeBox && (
+            <div className="mt-4 rounded-2xl bg-green-500/10 p-4 ring-1 ring-green-400/20">
+              <div className="text-sm font-semibold text-green-200">
+                Total pembayaran
+              </div>
+
+              <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                <div className="flex items-center justify-between rounded-xl bg-black/30 p-3 ring-1 ring-white/10">
+                  <span className="text-white/70">Harga dasar</span>
+                  <span className="font-semibold">{formatIdr(baseAmount!)}</span>
+                </div>
+
+                <div className="flex items-center justify-between rounded-xl bg-black/30 p-3 ring-1 ring-white/10">
+                  <span className="text-white/70">Biaya admin</span>
+                  <span className="font-semibold">
+                    {formatIdr(midtransFee!)}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between rounded-xl bg-black/30 p-3 ring-1 ring-white/10 sm:col-span-2">
+                  <span className="text-white/70">Total bayar</span>
+                  <span className="text-green-200 font-bold">
+                    {formatIdr(midtransTotal!)}
+                  </span>
+                </div>
+
+                {midtransMethod && (
+                  <div className="text-xs text-white/60 sm:col-span-2">
+                    Metode terdeteksi: <b className="text-white">{midtransMethod}</b>
+                  </div>
+                )}
+
+                <div className="text-xs text-white/50 sm:col-span-2">
+                  Catatan: biaya admin ditentukan oleh kanal pembayaran di Midtrans dan bisa berbeda tiap metode.
+                </div>
+              </div>
+            </div>
+          )}
 
           {msg && (
             <div className="mt-4 rounded-xl bg-white/5 p-3 text-sm ring-1 ring-white/10">
@@ -332,7 +430,7 @@ export default function PayPage() {
             disabled={loading}
             className="mt-6 w-full rounded-2xl bg-green-500/20 py-3 font-semibold ring-1 ring-green-400/40 hover:bg-green-500/25 disabled:opacity-50"
           >
-            {loading ? "Menyiapkan..." : "Bayar via QRIS / eWallet"}
+            {loading ? "Menyiapkan..." : "Bayar via Gopay / Bank [QRIS Belum tersedia]"}
           </button>
 
           {/* Member */}
@@ -358,7 +456,9 @@ export default function PayPage() {
           <div className="w-full max-w-md rounded-3xl bg-[#0b0b0b] p-6 ring-1 ring-white/10">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-lg font-bold">Pembayaran Khusus Member</div>
+                <div className="text-lg font-bold">
+                  Pembayaran Khusus Member
+                </div>
                 <div className="text-sm text-white/70">
                   {memberStep === 1 ? "Masukkan kode member" : "Isi data member"}
                 </div>
@@ -373,7 +473,9 @@ export default function PayPage() {
 
             {memberStep === 1 && (
               <>
-                <label className="mt-5 block text-sm text-white/70">Kode member</label>
+                <label className="mt-5 block text-sm text-white/70">
+                  Kode member
+                </label>
                 <input
                   className="mt-2 w-full rounded-xl bg-black/40 px-4 py-3 ring-1 ring-white/10 outline-none focus:ring-green-400/40"
                   value={memberCode}
@@ -405,7 +507,9 @@ export default function PayPage() {
 
             {memberStep === 2 && (
               <>
-                <label className="mt-5 block text-sm text-white/70">Nama asli</label>
+                <label className="mt-5 block text-sm text-white/70">
+                  Nama asli
+                </label>
                 <input
                   className="mt-2 w-full rounded-xl bg-black/40 px-4 py-3 ring-1 ring-white/10 outline-none focus:ring-green-400/40"
                   value={realName}
@@ -448,6 +552,8 @@ export default function PayPage() {
     </main>
   );
 }
+
+
 
 
 
