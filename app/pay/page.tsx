@@ -24,12 +24,12 @@ export default function PayPage() {
   const [memberLoading, setMemberLoading] = useState(false);
   const [memberMsg, setMemberMsg] = useState("");
 
+  // ambil orderId dari query params + simpan ke localStorage
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get("id") ?? "";
     setOrderId(id);
 
-    // simpan order ke localStorage biar muncul di /orders
     if (id) {
       try {
         const key = "senrobux_orders";
@@ -42,6 +42,48 @@ export default function PayPage() {
       } catch {}
     }
   }, []);
+
+  // ✅ POLLING STATUS (auto redirect kalau sudah PAID)
+  useEffect(() => {
+    if (!orderId) return;
+
+    let stop = false;
+
+    async function tick() {
+      try {
+        // 1) paksa sync status dari Midtrans
+        await fetch("/api/midtrans/refresh-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId }),
+        });
+
+        // 2) ambil status order terbaru dari DB
+        const r = await fetch(`/api/order/get?id=${orderId}`, { cache: "no-store" });
+        const j = await r.json().catch(() => null);
+
+        const status = j?.order?.status;
+
+        // status yang kita anggap pembayaran sudah beres
+        const paidLike = ["PAID", "WAITING_DELIVERY", "DONE", "PAID_WAIT_STOCK"];
+
+        if (paidLike.includes(status)) {
+          window.location.href = `/order-complete?id=${orderId}`;
+        }
+      } catch {}
+    }
+
+    // run langsung + interval
+    tick();
+    const t = setInterval(() => {
+      if (!stop) tick();
+    }, 3000);
+
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, [orderId]);
 
   async function payNow() {
     if (!orderId) return;
@@ -120,7 +162,6 @@ export default function PayPage() {
         return;
       }
 
-      // ✅ kalau benar baru lanjut step 2
       setMemberStep(2);
     } catch {
       setMemberMsg("Error jaringan/server");
@@ -140,8 +181,11 @@ export default function PayPage() {
         body: JSON.stringify({
           orderId,
           memberCode: memberCode.trim(),
-          name: realName.trim(),
-          kelas: kelas.trim(),
+
+          // ✅ sesuai format yang diminta
+          payment_method: "MEMBER",
+          member_name: realName.trim(),
+          member_class: kelas.trim(),
         }),
       });
 
@@ -245,7 +289,7 @@ export default function PayPage() {
                       setMemberMsg("Kode member wajib diisi");
                       return;
                     }
-                    verifyMemberCode(); // ✅ cek server dulu
+                    verifyMemberCode();
                   }}
                   disabled={memberLoading}
                   className="mt-6 w-full rounded-2xl bg-green-500/20 py-3 font-semibold ring-1 ring-green-400/40 hover:bg-green-500/25 disabled:opacity-50"
@@ -300,6 +344,7 @@ export default function PayPage() {
     </main>
   );
 }
+
 
 
 

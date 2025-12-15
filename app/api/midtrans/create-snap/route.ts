@@ -21,6 +21,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: "Order tidak ditemukan" }, { status: 404 });
   }
 
+  // ✅ base url untuk finish redirect (rapi)
+  // prioritas: NEXT_PUBLIC_BASE_URL, fallback: origin request
+  const envBase = (process.env.NEXT_PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
+  const origin = new URL(req.url).origin;
+  const baseUrl = envBase || origin;
+
   // 2) buat midtrans order_id yang:
   // - unik (biar bisa retry bayar)
   // - pendek (biar tidak tembus limit order_id Midtrans)
@@ -55,6 +61,12 @@ export async function POST(req: Request) {
     customer_details: {
       first_name: order.roblox_username,
     },
+
+    // ✅ Solusi “rapi”: setelah selesai bayar, Midtrans redirect ke halaman kamu
+    callbacks: {
+      finish: `${baseUrl}/order-complete?id=${orderId}`,
+    },
+
     // expiry (opsional)
     expiry: {
       unit: "minute",
@@ -91,5 +103,6 @@ export async function POST(req: Request) {
     );
   }
 }
+
 
 

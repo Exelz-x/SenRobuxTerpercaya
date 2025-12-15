@@ -155,7 +155,7 @@ export default function CreateGamepassPage() {
           <div className="mt-6 overflow-hidden rounded-2xl ring-1 ring-white/10">
             <div className="aspect-video bg-black">
               <iframe
-                src="https://www.youtube.com/embed/_SN4xCSzldg"
+                src="https://www.youtube.com/embed/iPJ061OOtGU"
                 title="Tutorial Membuat Game Pass Roblox"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen
