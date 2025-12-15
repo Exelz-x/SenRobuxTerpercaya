@@ -178,7 +178,7 @@ export default function OrderCompletePage() {
               <div className="mt-6 rounded-2xl bg-green-500/10 p-4 ring-1 ring-green-400/40">
                 <p className="text-sm leading-relaxed text-green-200">
                   ✅ Jika pembayaran kamu sudah berhasil, Robux akan masuk dalam
-                  waktu <strong className="text-green-300">5 hari</strong>.
+                  waktu <strong className="text-green-300">5 - 6 hari</strong>.
                   <br />
                   Mohon simpan nomor pesanan di atas untuk kebutuhan
                   bantuan/komplain.
