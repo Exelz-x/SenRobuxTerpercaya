@@ -16,9 +16,11 @@ export const config = {
   ],
 };
 
+// ✅ HARUS bernama `proxy` (atau pakai `export default function proxy(...)`)
 export async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname;
 
+  // Jangan ganggu webhook Midtrans
   if (path === "/api/midtrans/webhook") {
     return NextResponse.next();
   }
@@ -30,7 +32,7 @@ export async function proxy(req: NextRequest) {
   else if (path.startsWith("/api/ticket")) kind = "ticket";
 
   const rl = getRatelimiter(kind);
-  if (!rl) return NextResponse.next();
+  if (!rl) return NextResponse.next(); // dev tanpa Upstash, skip
 
   const { success, limit, remaining, reset } = await rl.limit(`ip:${ip}`);
 
@@ -55,4 +57,5 @@ export async function proxy(req: NextRequest) {
   res.headers.set("X-RateLimit-Reset", String(reset));
   return res;
 }
+
 
