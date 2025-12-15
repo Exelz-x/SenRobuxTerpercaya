@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 declare global {
   interface Window {
@@ -10,8 +10,40 @@ declare global {
   }
 }
 
+type Order = {
+  id: string;
+  created_at?: string;
+  roblox_username?: string;
+  robux_target?: number;
+  amount_idr?: number;
+  status?: string;
+  payment_channel?: string | null;
+  payment_method?: string | null;
+  midtrans_transaction_status?: string | null;
+};
+
+function formatIdr(n: number) {
+  return `Rp ${Number(n).toLocaleString("id-ID")}`;
+}
+
+function formatDateTime(iso?: string) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function PayPage() {
   const [orderId, setOrderId] = useState("");
+  const [order, setOrder] = useState<Order | null>(null);
+  const [loadingOrder, setLoadingOrder] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -43,6 +75,35 @@ export default function PayPage() {
     }
   }, []);
 
+  // ✅ ambil detail order untuk ditampilkan
+  useEffect(() => {
+    if (!orderId) return;
+
+    let stop = false;
+
+    async function load() {
+      setLoadingOrder(true);
+      try {
+        const r = await fetch(`/api/order/get?id=${orderId}`, { cache: "no-store" });
+        const j = await r.json().catch(() => null);
+        if (!stop) {
+          if (r.ok && j?.ok && j?.order) setOrder(j.order as Order);
+          else setOrder(null);
+        }
+      } catch {
+        if (!stop) setOrder(null);
+      } finally {
+        if (!stop) setLoadingOrder(false);
+      }
+    }
+
+    load();
+
+    return () => {
+      stop = true;
+    };
+  }, [orderId]);
+
   // ✅ POLLING STATUS (auto redirect kalau sudah PAID)
   useEffect(() => {
     if (!orderId) return;
@@ -62,9 +123,13 @@ export default function PayPage() {
         const r = await fetch(`/api/order/get?id=${orderId}`, { cache: "no-store" });
         const j = await r.json().catch(() => null);
 
-        const status = j?.order?.status;
+        const latest = j?.order as Order | undefined;
+        const status = String(latest?.status ?? "");
 
-        // status yang kita anggap pembayaran sudah beres
+        // update detail UI sekalian biar selalu fresh
+        if (latest && !stop) setOrder(latest);
+
+        // status yang dianggap pembayaran sudah beres
         const paidLike = ["PAID", "WAITING_DELIVERY", "DONE", "PAID_WAIT_STOCK"];
 
         if (paidLike.includes(status)) {
@@ -73,7 +138,6 @@ export default function PayPage() {
       } catch {}
     }
 
-    // run langsung + interval
     tick();
     const t = setInterval(() => {
       if (!stop) tick();
@@ -84,6 +148,16 @@ export default function PayPage() {
       clearInterval(t);
     };
   }, [orderId]);
+
+  const orderSummary = useMemo(() => {
+    return {
+      username: order?.roblox_username ?? "-",
+      robux: typeof order?.robux_target === "number" ? order.robux_target.toLocaleString("id-ID") : "-",
+      price: typeof order?.amount_idr === "number" ? formatIdr(order.amount_idr) : "-",
+      time: formatDateTime(order?.created_at),
+      status: order?.status ?? "-",
+    };
+  }, [order]);
 
   async function payNow() {
     if (!orderId) return;
@@ -102,9 +176,7 @@ export default function PayPage() {
 
       if (!res.ok || !json.ok) {
         setMsg(
-          json.detail
-            ? `${json.message}: ${json.detail}`
-            : json.message ?? "Gagal membuat transaksi Midtrans"
+          json.detail ? `${json.message}: ${json.detail}` : json.message ?? "Gagal membuat transaksi Midtrans"
         );
         return;
       }
@@ -116,7 +188,6 @@ export default function PayPage() {
 
       window.snap.pay(json.token, {
         onSuccess: async function () {
-          // paksa sinkron status ke server dulu (biar gak nunggu webhook)
           try {
             await fetch("/api/midtrans/refresh-status", {
               method: "POST",
@@ -124,7 +195,6 @@ export default function PayPage() {
               body: JSON.stringify({ orderId }),
             });
           } catch {}
-
           window.location.href = `/order-complete?id=${orderId}`;
         },
         onPending: function () {
@@ -181,8 +251,6 @@ export default function PayPage() {
         body: JSON.stringify({
           orderId,
           memberCode: memberCode.trim(),
-
-          // ✅ sesuai format yang diminta
           payment_method: "MEMBER",
           member_name: realName.trim(),
           member_class: kelas.trim(),
@@ -211,9 +279,45 @@ export default function PayPage() {
           <h1 className="text-2xl font-bold">Checkout</h1>
           <p className="mt-2 text-white/70">Pilih metode pembayaran di bawah.</p>
 
+          {/* ✅ GANTI Order ID -> Detail Pesanan */}
           <div className="mt-6 rounded-2xl bg-black/30 p-4 ring-1 ring-white/10">
-            <div className="text-sm text-white/70">Order ID</div>
-            <div className="font-mono break-all">{orderId || "-"}</div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm text-white/70">Detail Pesanan</div>
+              {loadingOrder && <div className="text-xs text-white/50">Memuat...</div>}
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-xl bg-white/5 p-3 ring-1 ring-white/10">
+                <div className="text-xs text-white/60">Username Roblox</div>
+                <div className="font-semibold">{orderSummary.username}</div>
+              </div>
+
+              <div className="rounded-xl bg-white/5 p-3 ring-1 ring-white/10">
+                <div className="text-xs text-white/60">Jumlah Robux</div>
+                <div className="font-semibold">{orderSummary.robux}</div>
+              </div>
+
+              <div className="rounded-xl bg-white/5 p-3 ring-1 ring-white/10">
+                <div className="text-xs text-white/60">Harga</div>
+                <div className="font-semibold">{orderSummary.price}</div>
+              </div>
+
+              <div className="rounded-xl bg-white/5 p-3 ring-1 ring-white/10">
+                <div className="text-xs text-white/60">Waktu Pembelian</div>
+                <div className="font-semibold">{orderSummary.time}</div>
+              </div>
+
+              <div className="rounded-xl bg-white/5 p-3 ring-1 ring-white/10 sm:col-span-2">
+                <div className="text-xs text-white/60">Status</div>
+                <div className="font-semibold">
+                  {orderSummary.status}
+                  {order?.midtrans_transaction_status ? ` • ${order.midtrans_transaction_status}` : ""}
+                </div>
+              </div>
+            </div>
+
+            {/* opsional: tampilkan orderId kecil */}
+            <div className="mt-3 text-xs text-white/40 break-all">ID: {orderId || "-"}</div>
           </div>
 
           {msg && (
@@ -344,6 +448,7 @@ export default function PayPage() {
     </main>
   );
 }
+
 
 
 

@@ -18,6 +18,9 @@ export default function HomePage() {
   const [stock, setStock] = useState<number | null>(null);
   const [stockLabel, setStockLabel] = useState<string>("...");
 
+  // ✅ loading saat create order / cek gamepass
+  const [loadingOrder, setLoadingOrder] = useState(false);
+
   const debounceRef = useRef<any>(null);
 
   // ✅ Patokan: 100 Robux = 12.000 => 1 Robux = 120
@@ -32,7 +35,6 @@ export default function HomePage() {
   const packages = [100, 200, 500, 1000, 2000, 5000];
 
   function calculatePriceIdr(r: number) {
-    // patokan langsung
     return Math.max(0, Math.floor(Number(r) * PRICE_PER_ROBUX));
   }
 
@@ -85,14 +87,12 @@ export default function HomePage() {
     const cleaned = v.replace(/[^\d]/g, "");
     setCustomRobux(cleaned);
 
-    // kalau kosong, jangan ubah robux (biar user bisa hapus & ketik ulang)
     if (!cleaned) return;
 
     const n = parseInt(cleaned, 10);
     if (Number.isFinite(n)) {
       const clamped = clampRobux(n);
       setRobux(clamped);
-      // jangan setCustomRobux(String(clamped)) biar caret tidak loncat-loncat
       setEditingPrice(false);
       setPriceInput("");
     }
@@ -104,7 +104,6 @@ export default function HomePage() {
     const n = parseInt(raw || "0", 10);
     const price = clampPrice(Number.isFinite(n) ? n : 0);
 
-    // hitung robux dari harga (dibulatkan ke bawah)
     const r = clampRobux(Math.floor(price / PRICE_PER_ROBUX));
 
     setRobux(r);
@@ -142,6 +141,7 @@ export default function HomePage() {
   }
 
   async function createOrder() {
+    if (loadingOrder) return; // prevent double click
     setError("");
 
     if (stock !== null && stock <= 0) {
@@ -154,32 +154,42 @@ export default function HomePage() {
       return;
     }
 
-    const res = await fetch("/api/order/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ robux, username: resolved.username }),
-    });
-
-    const json = await res.json();
-    if (!res.ok || !json.ok) {
-      setError(json.message ?? "Gagal membuat pesanan");
-      return;
-    }
+    setLoadingOrder(true);
 
     try {
-      const key = "senrobux_orders";
-      const raw = localStorage.getItem(key);
-      const list: string[] = raw ? JSON.parse(raw) : [];
-      if (!list.includes(json.orderId)) {
-        list.unshift(json.orderId);
-        localStorage.setItem(key, JSON.stringify(list.slice(0, 50)));
-      }
-    } catch {}
+      const res = await fetch("/api/order/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ robux, username: resolved.username }),
+      });
 
-    window.location.href = json.next;
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || !json.ok) {
+        setError(json.message ?? "Gagal membuat pesanan");
+        return;
+      }
+
+      try {
+        const key = "senrobux_orders";
+        const raw = localStorage.getItem(key);
+        const list: string[] = raw ? JSON.parse(raw) : [];
+        if (!list.includes(json.orderId)) {
+          list.unshift(json.orderId);
+          localStorage.setItem(key, JSON.stringify(list.slice(0, 50)));
+        }
+      } catch {}
+
+      window.location.href = json.next;
+    } catch {
+      setError("Terjadi error jaringan/server saat membuat pesanan.");
+    } finally {
+      setLoadingOrder(false);
+    }
   }
 
-  const disableBuy = loadingResolve || (stock !== null && stock <= 0);
+  const disableBuy =
+    loadingResolve || loadingOrder || (stock !== null && stock <= 0);
 
   return (
     <main className="min-h-screen bg-black text-white">
@@ -208,7 +218,7 @@ export default function HomePage() {
               />
             </div>
 
-            {/* TEXT LOGO - NEON PREMIUM (RECOMMENDED) */}
+            {/* TEXT LOGO */}
             <div
               className="
                 text-3xl font-extrabold tracking-wider text-green-400
@@ -465,7 +475,8 @@ export default function HomePage() {
                     <b className="text-green-300">
                       {clampRobux(
                         Math.floor(
-                          clampPrice(Number(priceInput || "0")) / PRICE_PER_ROBUX
+                          clampPrice(Number(priceInput || "0")) /
+                            PRICE_PER_ROBUX
                         )
                       ).toLocaleString("id-ID")}
                     </b>{" "}
@@ -475,12 +486,31 @@ export default function HomePage() {
               )}
             </div>
 
+            {/* ✅ Overlay loading saat cek gamepass/order */}
+            {loadingOrder && (
+              <div className="mt-4 rounded-2xl bg-black/30 p-4 ring-1 ring-white/10">
+                <div className="flex items-center gap-3 text-sm text-white/80">
+                  <div className="h-5 w-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  <div>
+                    Mengecek gamepass & menyiapkan checkout...
+                    <div className="text-xs text-white/50">
+                      Jangan tutup halaman ya.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <button
               onClick={createOrder}
               disabled={disableBuy}
-              className="mt-6 w-full rounded-2xl bg-green-500/20 py-3 font-semibold ring-1 ring-green-400/40 hover:bg-green-500/25 disabled:opacity-50"
+              className="mt-6 w-full rounded-2xl bg-green-500/20 py-3 font-semibold ring-1 ring-green-400/40 hover:bg-green-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {stock !== null && stock <= 0 ? "Stok Habis" : "Beli Robux →"}
+              {stock !== null && stock <= 0
+                ? "Stok Habis"
+                : loadingOrder
+                ? "Mengecek..."
+                : "Beli Robux →"}
             </button>
           </div>
         </section>
@@ -505,6 +535,7 @@ export default function HomePage() {
     </main>
   );
 }
+
 
 
 

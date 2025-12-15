@@ -142,6 +142,18 @@ export default function SupportPage() {
               Buat tiket bantuan dan chat dengan admin.
             </p>
           </div>
+
+          {/* ✅ TOMBOL KEMBALI KE BERANDA */}
+          <a
+            href="/"
+            className="
+              h-fit rounded-xl bg-white/5 px-4 py-2
+              text-sm font-semibold ring-1 ring-white/10
+              hover:ring-green-400/30 hover:text-green-300
+            "
+          >
+            ← Kembali ke Beranda
+          </a>
         </div>
 
         {/* FORM */}
@@ -249,6 +261,7 @@ export default function SupportPage() {
     </main>
   );
 }
+
 
 
 
