@@ -11,5 +11,11 @@ export async function POST(req: Request) {
   }
 
   const result = await findGamepassByPrice(userId, requiredPrice);
-  return NextResponse.json(result);
+
+  return NextResponse.json(result, {
+    headers: {
+      "Cache-Control": "no-store",
+    },
+  });
 }
+

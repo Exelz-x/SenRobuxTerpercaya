@@ -32,16 +32,16 @@ export default function AdminLoginPage() {
     <main className="min-h-screen bg-black text-white">
       <div className="mx-auto max-w-md px-4 py-16">
         <div className="rounded-3xl bg-white/5 p-6 ring-1 ring-white/10">
-          <h1 className="text-2xl font-bold">Admin Login</h1>
+          <h1 className="text-2xl font-bold">Admin Dashboard</h1>
 
-          <label className="mt-5 block text-sm text-white/70">Username</label>
+          <label className="mt-5 block text-sm text-white/70">Admin name</label>
           <input
             className="mt-2 w-full rounded-xl bg-black/40 px-4 py-3 ring-1 ring-white/10 outline-none focus:ring-green-400/40"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
           />
 
-          <label className="mt-4 block text-sm text-white/70">Password</label>
+          <label className="mt-4 block text-sm text-white/70">Admin pass</label>
           <input
             type="password"
             className="mt-2 w-full rounded-xl bg-black/40 px-4 py-3 ring-1 ring-white/10 outline-none focus:ring-green-400/40"

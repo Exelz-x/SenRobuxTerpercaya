@@ -2,7 +2,9 @@ type RobloxResolveResult =
   | { ok: true; userId: number; username: string; headshotUrl: string }
   | { ok: false; message: string };
 
-export async function resolveRobloxUsername(username: string): Promise<RobloxResolveResult> {
+export async function resolveRobloxUsername(
+  username: string
+): Promise<RobloxResolveResult> {
   const u = username.trim();
   if (!u) return { ok: false, message: "Username kosong" };
 
@@ -25,9 +27,7 @@ export async function resolveRobloxUsername(username: string): Promise<RobloxRes
   const canonicalUsername = String(data.name ?? u);
 
   // 2) userId -> avatar headshot
-  // Pakai thumbnails API
-  const thumbUrl =
-    `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`;
+  const thumbUrl = `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`;
 
   const r2 = await fetch(thumbUrl, { cache: "no-store" });
   if (!r2.ok) {
@@ -39,48 +39,60 @@ export async function resolveRobloxUsername(username: string): Promise<RobloxRes
   return { ok: true, userId, username: canonicalUsername, headshotUrl };
 }
 
+// ✅ GANTI TOTAL: versi filter anti "gamepass beli"
 export async function findGamepassByPrice(userId: number, requiredPrice: number) {
-  // Endpoint yang kamu kasih:
-  // GET https://apis.roblox.com/game-passes/v1/users/{USER_ID}/game-passes?count=100
-  // Catatan: beberapa endpoint punya pagination cursor.
-  // Kita loop sampai habis atau sampai ketemu.
-  let cursor: string | undefined = undefined;
+  let cursor: string | undefined;
 
-  for (let page = 0; page < 20; page++) { // batas aman biar gak infinite loop
+  for (let page = 0; page < 20; page++) {
     const url = new URL(`https://apis.roblox.com/game-passes/v1/users/${userId}/game-passes`);
     url.searchParams.set("count", "100");
     if (cursor) url.searchParams.set("cursor", cursor);
 
     const res = await fetch(url.toString(), { cache: "no-store" });
     if (!res.ok) {
-      return { ok: false as const, message: `Gagal cek gamepass (HTTP ${res.status})` };
+      return { ok: false as const, message: "Gagal cek gamepass Roblox" };
     }
 
     const json = await res.json();
-
     const items: any[] = json?.gamePasses ?? json?.data ?? [];
-    for (const gp of items) {
-      const price = Number(gp?.price ?? gp?.product?.price ?? gp?.displayPrice ?? gp?.seller?.price ?? NaN);
-      if (Number.isFinite(price) && price === requiredPrice) {
-        const gamepassId = Number(gp?.id ?? gp?.gamePassId ?? gp?.gamePass?.id);
-        const gamepassUrl = Number.isFinite(gamepassId)
-          ? `https://www.roblox.com/game-pass/${gamepassId}`
-          : "";
 
-        return {
-          ok: true as const,
-          found: true as const,
-          gamepassId,
-          gamepassUrl,
-          raw: gp,
-        };
+    for (const gp of items) {
+      const price = Number(
+        gp?.price ??
+          gp?.product?.price ??
+          gp?.displayPrice ??
+          NaN
+      );
+
+      if (!Number.isFinite(price) || price !== requiredPrice) continue;
+
+      const gamepassId = Number(gp?.id ?? gp?.gamePassId);
+      if (!Number.isFinite(gamepassId)) continue;
+
+      // 🔒 FILTER ANTI "GAMEPASS BELI"
+      // Gamepass yang DIBELI biasanya punya ownership flag
+      if (gp?.owned === true || gp?.isOwned === true) {
+        continue;
       }
+
+      // 🔒 FILTER TAMBAHAN: harus PUBLIC / for sale
+      if (gp?.isForSale === false) {
+        continue;
+      }
+
+      return {
+        ok: true as const,
+        found: true as const,
+        gamepassId,
+        gamepassUrl: `https://www.roblox.com/game-pass/${gamepassId}`,
+      };
     }
 
-    // pagination
-    cursor = json?.nextPageCursor ?? json?.nextCursor ?? undefined;
+    cursor = json?.nextPageCursor ?? json?.nextCursor;
     if (!cursor) break;
   }
 
   return { ok: true as const, found: false as const };
 }
+
+
