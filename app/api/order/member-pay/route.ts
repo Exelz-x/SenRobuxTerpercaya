@@ -6,9 +6,11 @@ export const runtime = "nodejs";
 
 const schema = z.object({
   orderId: z.string().min(1),
-  memberCode: z.string().min(1),
 
-  // dukung 2 versi field biar kompatibel
+  // masih terima memberCode dari frontend, tapi kita tidak validasi ke tabel lagi
+  memberCode: z.string().optional(),
+
+  // dukung 2 versi field
   name: z.string().optional(),
   kelas: z.string().optional(),
   member_name: z.string().optional(),
@@ -24,27 +26,17 @@ export async function POST(req: NextRequest) {
   }
 
   const orderId = String(body.orderId ?? "").trim();
-
-  // ✅ NORMALISASI CODE: trim + uppercase
-  const memberCodeRaw = String(body.memberCode ?? "").trim();
-  const memberCode = memberCodeRaw.toUpperCase();
-
   const memberName = String(body.member_name ?? body.name ?? "").trim();
   const memberClass = String(body.member_class ?? body.kelas ?? "").trim();
 
-  if (!orderId || !memberCode || !memberName || !memberClass) {
-    return NextResponse.json(
-      { ok: false, message: "Input tidak valid (orderId/kode/nama/kelas wajib diisi)" },
-      { status: 400 }
-    );
+  if (!orderId || !memberName || !memberClass) {
+    return NextResponse.json({ ok: false, message: "Input tidak valid" }, { status: 400 });
   }
 
-  // 1) Ambil order
+  // 1) Ambil order + pastikan kode sudah diverifikasi di step 1
   const { data: order, error: oErr } = await supabaseAdmin
     .from("orders")
-    .select(
-      "id, status, payment_channel, midtrans_order_id, midtrans_transaction_status, expires_at"
-    )
+    .select("id, status, member_code")
     .eq("id", orderId)
     .single();
 
@@ -54,7 +46,6 @@ export async function POST(req: NextRequest) {
 
   const statusNow = String(order.status ?? "");
   const paidLike = ["PAID", "WAITING_DELIVERY", "DONE", "PAID_WAIT_STOCK"];
-
   if (paidLike.includes(statusNow)) {
     return NextResponse.json(
       { ok: false, message: "Order sudah dibayar / diproses." },
@@ -62,28 +53,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 2) Verifikasi kode member (case-insensitive)
-  // ✅ tabel: member_codes, kolom: code, is_active
-  // Kalau di DB kamu kolomnya beda, ganti di sini.
-  const { data: codeRow, error: cErr } = await supabaseAdmin
-    .from("member_codes")
-    .select("code, is_active")
-    // ilike biar gak peka huruf besar/kecil
-    .ilike("code", memberCode)
-    .single();
-
-  // Kalau error karena "Row not found" supabase biasanya masuk error juga,
-  // jadi kita treat sama: dianggap tidak valid.
-  if (cErr || !codeRow) {
-    return NextResponse.json({ ok: false, message: "Kode member salah" }, { status: 400 });
+  // ✅ KUNCI: kalau belum pernah verifikasi kode, stop di sini
+  if (!order.member_code) {
+    return NextResponse.json(
+      { ok: false, message: "Kode member belum diverifikasi. Ulangi dari langkah kode member." },
+      { status: 400 }
+    );
   }
 
-  // is_active boleh null/true -> dianggap aktif
-  if (codeRow.is_active === false) {
-    return NextResponse.json({ ok: false, message: "Kode member sudah tidak aktif" }, { status: 400 });
-  }
-
-  // 3) Switch order -> MEMBER (48 jam)
+  // 2) Set order jadi MEMBER + isi data
   const memberExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
 
   const { error: upErr } = await supabaseAdmin
@@ -100,7 +78,7 @@ export async function POST(req: NextRequest) {
       // member tidak pakai expiry midtrans
       expires_at: null,
 
-      // reset midtrans field biar tidak nyangkut
+      // reset midtrans fields biar tidak nyangkut
       midtrans_order_id: null,
       midtrans_transaction_status: null,
       midtrans_snap_token: null,
