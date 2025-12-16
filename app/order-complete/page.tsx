@@ -77,6 +77,20 @@ export default function OrderCompletePage() {
     };
   }, [orderId]);
 
+  // ✅ Hapus checkout_intent setelah status sudah PAID
+  useEffect(() => {
+    const status = String(order?.status ?? "").toUpperCase();
+
+    // sesuaikan dengan status-status "paid-like" di sistem kamu
+    const paidLike = ["PAID", "WAITING_DELIVERY", "DONE", "PAID_WAIT_STOCK"];
+
+    if (paidLike.includes(status)) {
+      try {
+        localStorage.removeItem("senrobux_checkout_intent");
+      } catch {}
+    }
+  }, [order?.status]);
+
   return (
     <main className="min-h-screen bg-black text-white">
       <div className="mx-auto max-w-3xl px-4 py-10">
@@ -230,4 +244,5 @@ export default function OrderCompletePage() {
     </main>
   );
 }
+
 

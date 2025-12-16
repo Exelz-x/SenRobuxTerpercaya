@@ -1,78 +1,131 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { requiredGamepassPrice } from "@/lib/tax";
 
-type OrderData = {
-  id: string;
-  roblox_username: string;
-  headshot_url: string | null;
-  robux_target: number;
-  gamepass_price_required: number;
-};
+type ResolveResp =
+  | { ok: true; userId: number; username: string; headshotUrl: string }
+  | { ok: false; message: string };
+
+type GamepassCheckResp =
+  | { ok: true; found: boolean; gamepassId?: number; gamepassUrl?: string }
+  | { ok: false; message: string };
 
 export default function CreateGamepassPage() {
-  const [orderId, setOrderId] = useState("");
-  const [order, setOrder] = useState<OrderData | null>(null);
+  const [usernameQ, setUsernameQ] = useState<string>("");
+  const [robuxQ, setRobuxQ] = useState<number>(0);
+
+  const [resolved, setResolved] = useState<ResolveResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [message, setMessage] = useState("");
 
-  // ambil order ID dari URL
+  // 1) ambil query username & robux dari URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const id = params.get("id");
-    if (id) setOrderId(id);
+    const u = String(params.get("username") ?? "").trim();
+    const rRaw = String(params.get("robux") ?? "").trim();
+    const r = Number(rRaw);
+
+    setUsernameQ(u);
+    setRobuxQ(Number.isFinite(r) ? r : 0);
   }, []);
 
-  // ambil data order dari server
+  // 2) hitung requiredPrice dari robux
+  const requiredPrice = useMemo(() => {
+    const r = Math.max(1, Math.min(100000, Number(robuxQ || 0)));
+    return requiredGamepassPrice(r);
+  }, [robuxQ]);
+
+  // 3) resolve username -> userId + headshot
   useEffect(() => {
-    if (!orderId) return;
+    (async () => {
+      setMessage("");
 
-    fetch(`/api/order/get?id=${orderId}`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.ok) {
-          setOrder(json.order);
-        } else {
-          setMessage("Order tidak ditemukan");
+      if (!usernameQ || !robuxQ || robuxQ <= 0) {
+        setResolved(null);
+        setLoading(false);
+        setMessage("Query tidak valid. Pastikan URL berisi username & robux.");
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const res = await fetch("/api/roblox/resolve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: usernameQ }),
+        });
+
+        const json = (await res.json().catch(() => null)) as ResolveResp | null;
+
+        if (!res.ok || !json) {
+          setResolved(null);
+          setMessage("Gagal resolve username Roblox.");
+          setLoading(false);
+          return;
         }
+
+        setResolved(json);
+        if (!json.ok) setMessage(json.message);
+      } catch {
+        setResolved(null);
+        setMessage("Terjadi error jaringan/server saat resolve username.");
+      } finally {
         setLoading(false);
-      })
-      .catch(() => {
-        setMessage("Gagal mengambil data order");
-        setLoading(false);
-      });
-  }, [orderId]);
+      }
+    })();
+  }, [usernameQ, robuxQ]);
 
-  async function checkGamepassAgain() {
-    if (!orderId) return;
+  // 4) tombol "Sudah membuat gamepass" -> call /api/gamepass/check
+async function checkGamepassAgain() {
+  setMessage("");
 
-    setChecking(true);
-    setMessage("");
+  if (!resolved?.ok) {
+    setMessage("Username belum valid / belum ter-resolve.");
+    return;
+  }
 
-    const res = await fetch("/api/order/refresh-gamepass", {
+  setChecking(true);
+  try {
+    const res = await fetch("/api/gamepass/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderId }),
+      body: JSON.stringify({
+        userId: resolved.userId,
+        requiredPrice,
+      }),
     });
 
-    const json = await res.json();
+    const json = (await res.json().catch(() => null)) as GamepassCheckResp | null;
 
-    if (!res.ok || !json.ok) {
+    if (!res.ok || !json) {
+      setMessage("Gagal mengecek gamepass");
+      return;
+    }
+
+    if (json.ok === false) {
       setMessage(json.message ?? "Gagal mengecek gamepass");
-      setChecking(false);
       return;
     }
 
     if (!json.found) {
-      setMessage("❌ Gamepass belum ditemukan. Pastikan harga gamepass sudah sesuai dan ENABLE REGIONAL PRICING Pastikan MATI.");
-      setChecking(false);
+      setMessage(
+        "❌ Gamepass belum ditemukan. Pastikan harga gamepass sudah sesuai dan ENABLE REGIONAL PRICING Pastikan MATI."
+      );
       return;
     }
 
-    // ✅ sukses → ke pembayaran
-    window.location.href = json.next;
+    const u = encodeURIComponent(resolved.username);
+    const r = encodeURIComponent(String(robuxQ));
+    const uid = encodeURIComponent(String(resolved.userId));
+    window.location.href = `/checkout?username=${u}&robux=${r}&userId=${uid}`;
+  } catch {
+    setMessage("Terjadi error jaringan/server saat mengecek gamepass.");
+  } finally {
+    setChecking(false);
   }
+}
 
   if (loading) {
     return (
@@ -82,10 +135,10 @@ export default function CreateGamepassPage() {
     );
   }
 
-  if (!order) {
+  if (!usernameQ || !robuxQ || robuxQ <= 0) {
     return (
       <main className="min-h-screen bg-black text-white flex items-center justify-center">
-        Order tidak valid
+        Query tidak valid
       </main>
     );
   }
@@ -102,10 +155,10 @@ export default function CreateGamepassPage() {
           {/* PLAYER INFO */}
           <div className="mt-6 flex items-center gap-4 rounded-2xl bg-black/30 p-4 ring-1 ring-white/10">
             <div className="h-16 w-16 overflow-hidden rounded-full ring-2 ring-green-400/40 bg-white/5 flex items-center justify-center">
-              {order.headshot_url ? (
+              {resolved?.ok && resolved.headshotUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={order.headshot_url}
+                  src={resolved.headshotUrl}
                   alt="Avatar Roblox"
                   className="h-full w-full object-cover"
                 />
@@ -116,23 +169,25 @@ export default function CreateGamepassPage() {
 
             <div>
               <div className="text-sm text-white/70">Username Roblox</div>
-              <div className="text-lg font-semibold">{order.roblox_username}</div>
+              <div className="text-lg font-semibold">
+                {resolved?.ok ? resolved.username : usernameQ}
+              </div>
             </div>
           </div>
 
-          {/* ORDER INFO */}
+          {/* INFO */}
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-2xl bg-black/30 p-4 ring-1 ring-white/10">
               <div className="text-sm text-white/70">Jumlah Robux Dibeli</div>
               <div className="mt-1 text-xl font-bold text-green-300">
-                {order.robux_target.toLocaleString("id-ID")} Robux
+                {Number(robuxQ).toLocaleString("id-ID")} Robux
               </div>
             </div>
 
             <div className="rounded-2xl bg-black/30 p-4 ring-1 ring-white/10">
               <div className="text-sm text-white/70">Harga Game Pass Wajib</div>
               <div className="mt-1 text-xl font-bold text-green-400">
-                {order.gamepass_price_required.toLocaleString("id-ID")} Robux
+                {Number(requiredPrice).toLocaleString("id-ID")} Robux
               </div>
             </div>
           </div>
@@ -140,12 +195,14 @@ export default function CreateGamepassPage() {
           {/* INSTRUCTION */}
           <div className="mt-6 rounded-2xl bg-green-500/10 p-4 ring-1 ring-green-400/40">
             <p className="text-sm leading-relaxed text-green-200">
-              ⚠️ <strong>Perhatian:</strong><br />
+              ⚠️ <strong>Perhatian:</strong>
+              <br />
               Silakan buat <strong>Game Pass</strong> di Roblox dengan harga
               <strong className="text-green-300">
                 {" "}
-                {order.gamepass_price_required.toLocaleString("id-ID")} Robux
-              </strong>.
+                {Number(requiredPrice).toLocaleString("id-ID")} Robux
+              </strong>
+              .
               <br />
               Harga ini sudah disesuaikan dengan pajak Roblox sebesar 30%.
             </p>
@@ -183,7 +240,7 @@ export default function CreateGamepassPage() {
 
             <button
               onClick={checkGamepassAgain}
-              disabled={checking}
+              disabled={checking || !resolved?.ok}
               className="flex-1 rounded-2xl bg-white/5 py-3 font-semibold ring-1 ring-white/10 hover:ring-green-400/30 disabled:opacity-50"
             >
               {checking ? "Mengecek..." : "Sudah Membuat Game Pass"}
@@ -194,5 +251,6 @@ export default function CreateGamepassPage() {
     </main>
   );
 }
+
 
 

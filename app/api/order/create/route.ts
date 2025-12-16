@@ -11,6 +11,11 @@ export const runtime = "nodejs";
 const schema = z.object({
   robux: z.number().int().min(1).max(100000),
   username: z.string().min(1),
+
+  // opsional untuk MEMBER
+  payment_method: z.string().optional(), // "MIDTRANS" | "MEMBER"
+  member_name: z.any().optional(),
+  member_class: z.any().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -26,41 +31,85 @@ export async function POST(req: NextRequest) {
   }
 
   // =========================
-  // 2) BATASI PENDING (<= 3)
+  // 2) BODY + payment_method
+  // =========================
+  const body = await req.json().catch(() => null);
+  const parsed = schema.safeParse(body);
+
+  if (!parsed.success) {
+    return NextResponse.json({ ok: false, message: "Input tidak valid" }, { status: 400 });
+  }
+
+  const paymentMethod = String(body?.payment_method ?? "MIDTRANS").toUpperCase();
+  const paymentChannel = paymentMethod === "MEMBER" ? "MEMBER" : "MIDTRANS";
+
+  // =========================
+  // 3) LIMIT PENDING (<= 3)
+  //    + AUTO CANCEL MEMBER EXPIRED
   // =========================
   const nowIso = new Date().toISOString();
-  const { count, error: cErr } = await supabaseAdmin
+
+  // 3A) auto-cancel order MEMBER yang lewat 48 jam
+  await supabaseAdmin
+    .from("orders")
+    .update({ status: "CANCELLED" })
+    .eq("buyer_key", buyerKey)
+    .eq("payment_channel", "MEMBER")
+    .eq("status", "PENDING_PAYMENT")
+    .lte("member_expires_at", nowIso);
+
+  // 3B) hitung pending MIDTRANS yang belum expired
+  const { count: midPending, error: midErr } = await supabaseAdmin
     .from("orders")
     .select("id", { count: "exact", head: true })
     .eq("buyer_key", buyerKey)
+    .eq("payment_channel", "MIDTRANS")
     .eq("status", "PENDING_PAYMENT")
     .gt("expires_at", nowIso);
 
-  if (cErr) {
-    return NextResponse.json({ ok: false, message: cErr.message }, { status: 500 });
+  if (midErr) {
+    return NextResponse.json({ ok: false, message: midErr.message }, { status: 500 });
   }
 
-  if ((count ?? 0) >= 3) {
+  // 3C) hitung pending MEMBER yang belum lewat 48 jam
+  const { count: memPending, error: memErr } = await supabaseAdmin
+    .from("orders")
+    .select("id", { count: "exact", head: true })
+    .eq("buyer_key", buyerKey)
+    .eq("payment_channel", "MEMBER")
+    .eq("status", "PENDING_PAYMENT")
+    .gt("member_expires_at", nowIso);
+
+  if (memErr) {
+    return NextResponse.json({ ok: false, message: memErr.message }, { status: 500 });
+  }
+
+  // ✅ Batas 3 pending MIDTRANS
+  if ((midPending ?? 0) >= 3) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: "Kamu punya 3 pesanan yang belum dibayar. Selesaikan dulu sebelum buat pesanan lagi.",
+      },
+      { status: 429 }
+    );
+  }
+
+  // ✅ Batas 3 pending MEMBER (menunggu dibayar/menunggu admin set PAID)
+  if ((memPending ?? 0) >= 3) {
     return NextResponse.json(
       {
         ok: false,
         message:
-          "Kamu punya 3 pesanan yang belum dibayar. Selesaikan pembayaran dulu sebelum checkout lagi.",
+          "Kamu punya 3 pesanan yang belum dibayar. Selesaikan dulu sebelum buat pesanan lagi.",
       },
       { status: 429 }
     );
   }
 
   // =========================
-  // 3) VALIDASI INPUT
+  // 4) VALIDASI INPUT UTAMA
   // =========================
-  const body = await req.json().catch(() => null);
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ ok: false, message: "Input tidak valid" }, { status: 400 });
-  }
-
-  // ✅ ambil dari body, lalu validasi ulang (sesuai request)
   const robux = Number(body.robux);
   if (!Number.isFinite(robux) || robux <= 0) {
     return NextResponse.json({ ok: false, message: "Jumlah Robux tidak valid" }, { status: 400 });
@@ -72,7 +121,7 @@ export async function POST(req: NextRequest) {
   }
 
   // =========================
-  // 4) HITUNG HARGA + RESOLVE ROBLOX
+  // 5) HITUNG HARGA + RESOLVE ROBLOX
   // =========================
   const priceRequired = requiredGamepassPrice(robux);
   const amountIdr = calculatePriceIdr(robux);
@@ -87,7 +136,7 @@ export async function POST(req: NextRequest) {
   const gamepassUrl = check.ok && check.found ? check.gamepassUrl : null;
 
   // =========================
-  // 5) CEK STOCK (SEBELUM INSERT)
+  // 6) CEK STOCK (SEBELUM INSERT)
   // =========================
   const { data: st, error: stErr } = await supabaseAdmin
     .from("stock")
@@ -116,59 +165,80 @@ export async function POST(req: NextRequest) {
   }
 
   // =========================
-  // 6) expires_at (PENDING_PAYMENT)
+  // 7) EXPIRES (MIDTRANS / MEMBER)
   // =========================
   const EXPIRE_MINUTES = Number(process.env.MIDTRANS_EXPIRE_MINUTES ?? "15");
   const expiresAt = new Date(Date.now() + EXPIRE_MINUTES * 60 * 1000).toISOString();
+  const memberExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
 
   // =========================
-  // 7) INSERT ORDER (buyer_key + expires_at)
+  // 8) INSERT ORDER
   // =========================
+  const insertPayload: Record<string, any> = {
+    buyer_key: buyerKey,
+
+    roblox_username: resolved.username,
+    roblox_user_id: resolved.userId,
+    headshot_url: resolved.headshotUrl,
+    robux_target: robux,
+    gamepass_price_required: priceRequired,
+    gamepass_id: gamepassId,
+    gamepass_url: gamepassUrl,
+    amount_idr: amountIdr,
+    short_code: generateShortCode(),
+
+    payment_method: paymentMethod,
+  };
+
+  if (paymentChannel === "MIDTRANS") {
+    insertPayload.payment_channel = "MIDTRANS";
+    insertPayload.status = "PENDING_PAYMENT";
+    insertPayload.expires_at = expiresAt;
+    insertPayload.member_expires_at = null;
+    insertPayload.member_name = null;
+    insertPayload.member_class = null;
+  } else {
+    insertPayload.payment_channel = "MEMBER";
+    insertPayload.status = "PENDING_PAYMENT"; // ✅ tetap pending (admin yang set PAID nanti)
+    insertPayload.member_name = body?.member_name ?? null;
+    insertPayload.member_class = body?.member_class ?? null;
+    insertPayload.member_expires_at = memberExpiresAt;
+    insertPayload.expires_at = null;
+  }
+
   const { data, error } = await supabaseAdmin
     .from("orders")
-    .insert({
-      buyer_key: buyerKey,
-      status: "PENDING_PAYMENT",
-      expires_at: expiresAt,
-
-      roblox_username: resolved.username,
-      roblox_user_id: resolved.userId,
-      headshot_url: resolved.headshotUrl,
-      robux_target: robux,
-      gamepass_price_required: priceRequired,
-      gamepass_id: gamepassId,
-      gamepass_url: gamepassUrl,
-      amount_idr: amountIdr,
-      payment_method: "MIDTRANS",
-      short_code: generateShortCode(),
-    })
-    .select("id, gamepass_id, gamepass_url, gamepass_price_required")
+    .insert(insertPayload)
+    .select("id, gamepass_id, gamepass_url, gamepass_price_required, payment_channel")
     .single();
 
   if (error || !data) {
-    return NextResponse.json(
-      { ok: false, message: "Gagal simpan order", detail: error?.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, message: "Gagal simpan order", detail: error?.message }, { status: 500 });
   }
 
-  const next = data.gamepass_id ? `/pay?id=${data.id}` : `/create-gamepass?id=${data.id}`;
+  const next =
+    data.payment_channel === "MEMBER"
+      ? `/member-instructions?id=${data.id}`
+      : data.gamepass_id
+      ? `/pay?id=${data.id}`
+      : `/create-gamepass?id=${data.id}`;
 
   // =========================
-  // 8) RESPONSE + SET COOKIE (JIKA BARU)
+  // 9) RESPONSE + SET COOKIE
   // =========================
   const res = NextResponse.json({
     ok: true,
     orderId: data.id,
     requiredPrice: data.gamepass_price_required,
     next,
+    paymentChannel: data.payment_channel,
   });
 
   if (needSetCookie) {
     res.cookies.set("buyer_key", buyerKey, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production", // localhost aman
+      secure: process.env.NODE_ENV === "production",
       path: "/",
       maxAge: 60 * 60 * 24 * 365,
     });
@@ -176,6 +246,8 @@ export async function POST(req: NextRequest) {
 
   return res;
 }
+
+
 
 
 
