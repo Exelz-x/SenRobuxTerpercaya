@@ -4,16 +4,13 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
-// Terima dua versi nama field (biar aman):
-// - lama: name, kelas
-// - baru: member_name, member_class
 const schema = z.object({
   orderId: z.string().min(1),
   memberCode: z.string().min(1),
 
+  // dukung 2 versi field biar kompatibel
   name: z.string().optional(),
   kelas: z.string().optional(),
-
   member_name: z.string().optional(),
   member_class: z.string().optional(),
 });
@@ -27,7 +24,10 @@ export async function POST(req: NextRequest) {
   }
 
   const orderId = String(body.orderId ?? "").trim();
-  const memberCode = String(body.memberCode ?? "").trim();
+
+  // ✅ NORMALISASI CODE: trim + uppercase
+  const memberCodeRaw = String(body.memberCode ?? "").trim();
+  const memberCode = memberCodeRaw.toUpperCase();
 
   const memberName = String(body.member_name ?? body.name ?? "").trim();
   const memberClass = String(body.member_class ?? body.kelas ?? "").trim();
@@ -55,7 +55,6 @@ export async function POST(req: NextRequest) {
   const statusNow = String(order.status ?? "");
   const paidLike = ["PAID", "WAITING_DELIVERY", "DONE", "PAID_WAIT_STOCK"];
 
-  // 2) Kalau sudah dibayar/selesai -> stop
   if (paidLike.includes(statusNow)) {
     return NextResponse.json(
       { ok: false, message: "Order sudah dibayar / diproses." },
@@ -63,28 +62,30 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 3) (Opsional tapi disarankan) Kalau Midtrans sudah benar-benar jalan dan belum expired,
-  //    kamu bisa pilih mau blok switch. Aku bikin "soft guard":
-  //    - Kalau sudah punya midtrans_order_id + status pending, boleh switch (kita reset midtrans field).
-  //    - Kalau kamu mau blok, ganti logic ini jadi return error.
-  // (Jadi versi ini: SWITCH DIBOLEHKAN)
-
-  // 4) Verifikasi kode member
-  // SESUAIKAN nama tabel/kolom kamu bila beda.
+  // 2) Verifikasi kode member (case-insensitive)
+  // ✅ tabel: member_codes, kolom: code, is_active
+  // Kalau di DB kamu kolomnya beda, ganti di sini.
   const { data: codeRow, error: cErr } = await supabaseAdmin
     .from("member_codes")
     .select("code, is_active")
-    .eq("code", memberCode)
+    // ilike biar gak peka huruf besar/kecil
+    .ilike("code", memberCode)
     .single();
 
-  if (cErr || !codeRow || codeRow.is_active === false) {
+  // Kalau error karena "Row not found" supabase biasanya masuk error juga,
+  // jadi kita treat sama: dianggap tidak valid.
+  if (cErr || !codeRow) {
     return NextResponse.json({ ok: false, message: "Kode member salah" }, { status: 400 });
   }
 
-  // 5) Switch order -> MEMBER (48 jam)
+  // is_active boleh null/true -> dianggap aktif
+  if (codeRow.is_active === false) {
+    return NextResponse.json({ ok: false, message: "Kode member sudah tidak aktif" }, { status: 400 });
+  }
+
+  // 3) Switch order -> MEMBER (48 jam)
   const memberExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
 
-  // Reset midtrans fields biar tidak nyangkut (ini penting!)
   const { error: upErr } = await supabaseAdmin
     .from("orders")
     .update({
@@ -96,10 +97,10 @@ export async function POST(req: NextRequest) {
       member_class: memberClass,
       member_expires_at: memberExpiresAt,
 
-      // member tidak pakai midtrans expiry
+      // member tidak pakai expiry midtrans
       expires_at: null,
 
-      // reset midtrans biar aman
+      // reset midtrans field biar tidak nyangkut
       midtrans_order_id: null,
       midtrans_transaction_status: null,
       midtrans_snap_token: null,
@@ -116,5 +117,6 @@ export async function POST(req: NextRequest) {
     next: `/member-instructions?id=${orderId}`,
   });
 }
+
 
 
